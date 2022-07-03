@@ -1,8 +1,5 @@
 from bs4 import BeautifulSoup
-from lxml import html, etree
-import pprint
 import re
-import os
 from glob import glob
 
 # note on old website format vs. new
@@ -43,10 +40,16 @@ def scrape_updates_novelkeys_xyz(filepath):
         for i in all_products:
             item_info = i.find_all("span", attrs={"data-pf-type": "Text"})
             name = item_info[0].text.strip()
-            data[name] = {}
+
+            # grouping status by number of matches:
+            # 5: in progress
+            # 3: live
+            # 2: completed
+            assert len(item_info) == 5 or len(item_info) == 2 or len(item_info) == 3
 
             # in progress
             if len(item_info) == 5:
+                data[name] = {}
                 if len(item_info) > 2:
                     data[name]["estimate"] = item_info[2].text.strip()
 
@@ -54,15 +57,37 @@ def scrape_updates_novelkeys_xyz(filepath):
                     data[name]["status"] = item_info[4].text.strip()
 
             # completed
-            elif len(item_info) == 2:
-                data[name]["status"] = item_info[1].text.strip()
+            # elif len(item_info) == 2:
+            #     data[name]["status"] = item_info[1].text.strip()
 
             # live
             elif len(item_info) == 3:
+                data[name] = {}
                 data[name]["estimate"] = item_info[2].text.strip()
 
-            else:  # assert there are no edge cases here
-                raise Exception("Unknown length", item_info)
+    return data
+
+
+def _get_product_info(soup, category):
+    data = {}
+    all_products = soup.select_one("#" + category).find_all(
+        "div", {"class": "preorder-timeline-details"}
+    )
+
+    for product in all_products:
+        name = product.find("h2", {"class": "preorder-timeline-title"}).text
+
+        product_details = product.find_all("p", {})
+        status = product_details[0].text.strip()
+        estimate = None
+        if len(product_details) > 1:
+            estimate = product_details[1].text.strip()
+
+        data[name] = {"status": status, "category": category}
+
+        if estimate:
+            data[name]["estimate_text"] = estimate
+            data[name]["estimate"] = estimate.split("Estimated Arrival:")[1].strip()
 
     return data
 
@@ -80,28 +105,15 @@ def scrape_updates_novelkeys_com(filepath):
     'Sloth Deskpad': {'estimate': 'Aug. 2021',
                    'status': 'Production complete. In transit to NovelKeys.'},
     """
+
     with open(filepath) as fp:
         soup = BeautifulSoup(fp, "html.parser")
 
-        all_products = soup.select_one("#keycaps").find_all(
-            "div", {"class": "preorder-timeline-details"}
-        )
+        categories = ["keycaps", "keyboards", "deskpads", "switches"]
+        category_data = [_get_product_info(soup, category) for category in categories]
 
-        data = {}
-
-        for product in all_products:
-            name = product.find("h2", {"class": "preorder-timeline-title"}).text
-
-            product_details = product.find_all("p", {})
-            status = product_details[0].text.strip()
-            estimate = None
-            if len(product_details) > 1:
-                estimate = product_details[1].text.strip()
-
-            data[name] = {"status": status}
-
-            if estimate:
-                data[name]["estimate_text"] = estimate
-                data[name]["estimate"] = estimate.split("Estimated Arrival:")[1].strip()
-
-    return data
+        super_dict = {}
+        for d in category_data:
+            for k, v in d.items():  # d.items() in Python 3+
+                super_dict.setdefault(k, []).append(v)
+        return super_dict
