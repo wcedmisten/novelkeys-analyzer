@@ -1,64 +1,76 @@
 from bs4 import BeautifulSoup
 import pprint
-import os
+import re
 from glob import glob
 
+from scrape import scrape_updates_novelkeys_com, scrape_updates_novelkeys_xyz
 
-def scrape_updates(filepath):
-    print("scraping ", filepath)
-    with open(filepath) as fp:
-        soup = BeautifulSoup(fp, "html.parser")
+xyz_snapshots = []
 
-        all_products = soup.select_one("#keycaps").find_all(
-            "div", {"class": "preorder-timeline-details"}
-        )
-
-        data = {}
-
-        for product in all_products:
-            name = product.find("h2", {"class": "preorder-timeline-title"}).text
-
-            product_details = product.find_all("p", {})
-            status = product_details[0].text.strip()
-            estimate = None
-            if len(product_details) > 1:
-                estimate = product_details[1].text.strip()
-
-            data[name] = {"status": status}
-
-            if estimate:
-                data[name]["estimate_text"] = estimate
-                data[name]["estimate"] = estimate.split("Estimated Arrival:")[1].strip()
-
-    return data
-
-
-snapshots = []
-
-os.walk("/home/wcedmisten/Downloads/novelkeys-wayback")
-for (
-    file
-) in glob(  # TODO: add novelkeys.xyz support. currently it breaks the webpage parsing
-    "/home/william/Downloads/novelkeys-wayback/*/novelkeys.com/pages/*updates"
+for file in glob(
+    "/home/william/Downloads/novelkeys-wayback/*/novelkeys.xyz/pages/updates"
 ):
-    snapshots.append(file)
+    xyz_snapshots.append(file)
 
-snapshots.sort()
+xyz_snapshots.sort()
+
+prev_products = None
+
+xyz_date_regex = re.compile(
+    r"/home/william/Downloads/novelkeys-wayback/(?P<date>.*)/novelkeys.xyz/pages/updates"
+)
+
+for f in xyz_snapshots:
+    scraped_data = scrape_updates_novelkeys_xyz(f)
+
+    m = xyz_date_regex.match(f)
+    date = m.group("date")
+    print(f"Date: {date}, Found {len(scraped_data)} items")
+
+    # pprint.pprint(scraped_data)
+    # curr_products = set(scraped_data.keys())
+
+    # if prev_products:
+    #     if prev_products.difference(curr_products):
+    #         print("Newly removed")
+    #         print(prev_products.difference(curr_products))
+
+    #     if curr_products.difference(prev_products):
+    #         print("Newly added")
+    #         print(curr_products.difference(prev_products))
+
+    # prev_products = curr_products
+
+
+com_snapshots = []
+
+for file in glob(
+    "/home/william/Downloads/novelkeys-wayback/*/novelkeys.com/pages/product-updates"
+):
+    com_snapshots.append(file)
+
+com_snapshots.sort()
+
+com_date_regex = re.compile(
+    r"/home/william/Downloads/novelkeys-wayback/(?P<date>.*)/novelkeys.com/pages/product-updates"
+)
 
 prev_products = set()
 
-print(len(snapshots))
+for f in com_snapshots:
+    scraped_data = scrape_updates_novelkeys_com(f)
+    curr_products = set(scraped_data.keys())
 
-for f in snapshots:
-    print(f)
+    m = com_date_regex.match(f)
+    date = m.group("date")
+    print(f"Date: {date}, Found {len(scraped_data)} items")
 
-for f in snapshots:
-    curr_products = set(scrape_updates(f).keys())
+    # pprint.pprint(curr_products)
 
-    print("Newly removed")
-    print(prev_products.difference(curr_products))
+    # print("Newly removed")
+    # print(prev_products.difference(curr_products))
 
-    print("Newly added")
-    print(curr_products.difference(prev_products))
+    # print("Newly added")
+    # print(curr_products.difference(prev_products))
 
-    prev_products = curr_products
+    # prev_products = curr_products

@@ -15,3 +15,7 @@ waybackpack https://novelkeys.com/pages/product-updates -d ~/Downloads/novelkeys
 waybackpack https://novelkeys.xyz/pages/updates -d ~/Downloads/novelkeys-wayback
 ```
 
+Remove a page that's just a redirect to novelkeys.com
+```bash
+rm ~/Downloads/novelkeys-wayback/20220617092711/novelkeys.xyz/pages/updates
+```
