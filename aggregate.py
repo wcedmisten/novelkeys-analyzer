@@ -45,6 +45,7 @@ def aggregate_data():
     )
 
     for f in com_snapshots:
+        print(f)
         scraped_data = scrape_updates_novelkeys_com(f)
 
         m = com_date_regex.match(f)

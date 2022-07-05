@@ -57,13 +57,15 @@ def scrape_updates_novelkeys_xyz(filepath):
                     data[name]["status"] = item_info[4].text.strip()
 
             # completed
-            # elif len(item_info) == 2:
-            #     data[name]["status"] = item_info[1].text.strip()
+            elif len(item_info) == 2:
+                data[name] = {}
+                data[name]["status"] = "completed"
 
             # live
             elif len(item_info) == 3:
                 data[name] = {}
                 data[name]["estimate"] = item_info[2].text.strip()
+                data[name]["status"] = "live"
 
     return data
 
@@ -114,6 +116,6 @@ def scrape_updates_novelkeys_com(filepath):
 
         super_dict = {}
         for d in category_data:
-            for k, v in d.items():  # d.items() in Python 3+
-                super_dict.setdefault(k, []).append(v)
+            for k, v in d.items():
+                super_dict[k] = v
         return super_dict
