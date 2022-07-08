@@ -41,6 +41,13 @@ def scrape_updates_novelkeys_xyz(filepath):
             item_info = i.find_all("span", attrs={"data-pf-type": "Text"})
             name = item_info[0].text.strip()
 
+            if "deskpad" in name.lower():
+                category = "deskpads"
+            elif "keyboard" in name.lower():
+                category = "keyboards"
+            else:
+                category = "keycaps"
+
             # grouping status by number of matches:
             # 5: in progress
             # 3: live
@@ -49,7 +56,7 @@ def scrape_updates_novelkeys_xyz(filepath):
 
             # in progress
             if len(item_info) == 5:
-                data[name] = {}
+                data[name] = {"category": category}
                 if len(item_info) > 2:
                     data[name]["estimate"] = item_info[2].text.strip()
 
@@ -58,12 +65,12 @@ def scrape_updates_novelkeys_xyz(filepath):
 
             # completed
             elif len(item_info) == 2:
-                data[name] = {}
+                data[name] = {"category": category}
                 data[name]["status"] = "completed"
 
             # live
             elif len(item_info) == 3:
-                data[name] = {}
+                data[name] = {"category": category}
                 data[name]["estimate"] = item_info[2].text.strip()
                 data[name]["status"] = "live"
 

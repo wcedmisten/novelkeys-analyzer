@@ -1,6 +1,8 @@
 import pprint
 
-from pexpect import ExceptionPexpect
+import matplotlib.dates as mdates
+import matplotlib.patches as mpatches
+
 from aggregate import aggregate_data
 import json
 import os.path
@@ -56,9 +58,12 @@ name_cleanup = {
     "Li'l Dragon Accesories": "Li'l Dragon Accessories",
     "JTK Griseann / Royal Alphas": "JTK Griseann / Royal Alpha",
     "GMK Oblivion V3.1 GB": "GMK Oblivion V3.1",
+    "NK65™ - Oblivion V3.1 Edition": "GMK Oblivion V3.1",
+    "GMK Monokai": "GMK Monokai Material",
     "GMK Handarbeit R2 GB": "GMK Handarbeit R2",
     "Colorchrome Deskpads": "Colorchrome Deskpad",
     "Awaken Deskpads": "Awaken Deskpad",
+    "Analog Dreams Deskpads": "Analog Dreams R2 Deskpad",
 }
 
 # turn a text estimate into a datetime
@@ -93,6 +98,10 @@ for timestamp, val in data.items():
         cleaned_data[timestamp] = {}
 
     for name in val.keys():
+        # special case - skip this because it's duplicate
+        if name == "NK65™ - Oblivion V3.1 Edition":
+            continue
+
         # use the preferred "cleaned" name if possible
         # otherwise keep the old name
         new_name = name_cleanup.get(name, name)
@@ -120,9 +129,6 @@ for timestamp, val in cleaned_data.items():
     for name, product in val.items():
         estimate_set.add(product.get("estimate"))
         status_set.add(product.get("status"))
-
-# pprint.pprint(status_set)
-# pprint.pprint(estimate_set)
 
 
 def get_num_completed(snapshot_data):
@@ -180,48 +186,128 @@ df["latest_seen"] = df.groupby("product_name")["scrape_time"].transform("max")
 
 df["tracked_time"] = df["latest_seen"] - df["earliest_seen"]
 
-# print(
-#     df.filter(
-#         items=[
-#             "scrape_time",
-#             "estimate",
-#             "status",
-#             "earliest_seen",
-#             "product_name",
-#             "tracked_time",
-#         ]
-#     ).sort_values(by="tracked_time", ascending=False)
-# )
-
-completed_products = (
-    df.filter(
-        items=[
-            "scrape_time",
-            "estimate",
-            "status",
-            "earliest_seen",
-            "product_name",
-            "tracked_time",
-        ]
-    )
-    .loc[df["latest_seen"] < datetime.datetime(2022, 6, 17)]["product_name"]
-    .unique()
+print(
+    df.loc[df["product_name"] == "GMK Dots R2"].filter(items=["status", "scrape_time"])
 )
 
-print(df.loc[df["product_name"] == "GMK Honor"])
-print(completed_products)
 
-x = np.array(df.loc[df["product_name"] == "GMK Honor"]["earliest_seen"].unique())
-y = np.array(df.loc[df["product_name"] == "GMK Honor"]["latest_seen"].unique())
-print(x, y)
-labels = ["GMK Honor"]
+def graph_product_updates(
+    df,
+    sort_by_earliest=True,
+    show_categories=True,
+    show_product_labels=False,
+    filter_incomplete_data=True,
+    filter_categories=None,
+):
+    if filter_incomplete_data:
+        # only show products which have started after the first scrape date
+        # and ended before the last date, to get the whole run accurately
+        df = df.loc[df["latest_seen"] < datetime.datetime(2022, 6, 17)]
+        df = df.loc[df["earliest_seen"] > datetime.datetime(2019, 11, 14)]
 
-# TODO: https://stackoverflow.com/questions/11042290/how-can-i-use-xaxis-date-with-barh
+    if filter_categories is not None:
+        df = df.loc[df["category"].isin(filter_categories)]
 
-ax = plt.subplot(111)
-ax.xaxis_date()
+    agg_data = (
+        df.groupby("product_name")
+        .agg(
+            earliest_seen=("earliest_seen", "first"),
+            latest_seen=("latest_seen", "first"),
+            product_name=("product_name", "first"),
+            category=("category", "first"),
+            estimate=("refined_estimate", "first"),
+        )
+        .sort_values("earliest_seen" if sort_by_earliest else "latest_seen")
+    )
 
-ax.barh(y, [1] * len(x), left=x, color="red", edgecolor="red", align="center", height=1)
-plt.ylim(max(y) + 0.5, min(y) - 0.5)
-plt.yticks(np.arange(y.max() + 1), labels)
-plt.show()
+    earliest_date = agg_data["earliest_seen"]
+    latest_date = agg_data["latest_seen"]
+
+    estimate_date = agg_data["estimate"]
+
+    labels = agg_data["product_name"]
+    categories = agg_data["category"]
+
+    color_map = {
+        "keycaps": "#0168b4",
+        "keyboards": "#7ddb72",
+        "deskpads": "#bc0072",
+        "switches": "#ff5949",
+    }
+
+    colors = list(map(lambda category: color_map.get(category, "black"), categories))
+
+    # Now convert them to matplotlib's internal format...
+    earliest_date, latest_date, estimate_date = [
+        mdates.date2num(item) for item in (earliest_date, latest_date, estimate_date)
+    ]
+
+    ypos = range(len(earliest_date))
+    fig, ax = plt.subplots()
+
+    # Plot the estimate
+    ax.barh(
+        ypos,
+        earliest_date - estimate_date,
+        left=estimate_date,
+        height=0.7,
+        align="center",
+        color="black",
+    )
+
+    # Plot the data
+    container = ax.barh(
+        ypos,
+        earliest_date - latest_date,
+        left=latest_date,
+        height=0.9,
+        align="center",
+        color=(colors if show_categories else None),
+    )
+
+    # Plot the estimate
+    ax.barh(
+        ypos,
+        earliest_date - estimate_date,
+        left=estimate_date,
+        height=0.7,
+        align="center",
+        color="black",
+    )
+
+    ax.get_yaxis().set_visible(False)
+    ax.axis("auto")
+    ax.set_xlim([datetime.datetime(2019, 11, 14), datetime.datetime(2022, 6, 17)])
+
+    if show_product_labels:
+        ax.bar_label(container, labels)
+    ax.xaxis_date()
+
+    ax.legend(color_map.keys(), color_map.values())
+
+    legend_handles = list(
+        map(
+            lambda item: mpatches.Patch(color=item[1], label=item[0]),
+            color_map.items(),
+        ),
+    )
+    if show_categories:
+        ax.legend(handles=legend_handles)
+
+    plt.title(
+        "Timeline of Novelkeys Updates, sorted by "
+        + ("start date" if sort_by_earliest else "completion date")
+    )
+    plt.show()
+
+
+# plot_num_products()
+# graph_product_updates(df)
+
+# graph_product_updates(df, show_categories=False, filter_incomplete_data=False)
+
+# graph_product_updates(df, show_categories=False)
+
+graph_product_updates(df, show_product_labels=False)
+
+graph_product_updates(df, filter_categories=["keycaps"])
