@@ -198,6 +198,7 @@ def graph_product_updates(
     show_product_labels=False,
     filter_incomplete_data=True,
     filter_categories=None,
+    display_estimates=True,
 ):
     if filter_incomplete_data:
         # only show products which have started after the first scrape date
@@ -246,14 +247,14 @@ def graph_product_updates(
     fig, ax = plt.subplots()
 
     # Plot the estimate
-    ax.barh(
-        ypos,
-        earliest_date - estimate_date,
-        left=estimate_date,
-        height=0.7,
-        align="center",
-        color="black",
-    )
+    # ax.barh(
+    #     ypos,
+    #     earliest_date - estimate_date,
+    #     left=estimate_date,
+    #     height=0.8,
+    #     align="center",
+    #     color="black",
+    # )
 
     # Plot the data
     container = ax.barh(
@@ -265,15 +266,10 @@ def graph_product_updates(
         color=(colors if show_categories else None),
     )
 
-    # Plot the estimate
-    ax.barh(
-        ypos,
-        earliest_date - estimate_date,
-        left=estimate_date,
-        height=0.7,
-        align="center",
-        color="black",
-    )
+    if display_estimates:
+        estimate_points = plt.scatter(
+            estimate_date, ypos, s=40, c="black", marker="*", label="Initial Estimate"
+        )
 
     ax.get_yaxis().set_visible(False)
     ax.axis("auto")
@@ -291,6 +287,9 @@ def graph_product_updates(
             color_map.items(),
         ),
     )
+    if display_estimates:
+        legend_handles.append(estimate_points)
+
     if show_categories:
         ax.legend(handles=legend_handles)
 
@@ -308,6 +307,7 @@ def graph_product_updates(
 
 # graph_product_updates(df, show_categories=False)
 
-graph_product_updates(df, show_product_labels=False)
+graph_product_updates(df, display_estimates=True)
+graph_product_updates(df, display_estimates=False)
 
-graph_product_updates(df, filter_categories=["keycaps"])
+# graph_product_updates(df, filter_categories=["keycaps"])
