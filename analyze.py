@@ -11,6 +11,9 @@ import datetime
 from numpy.polynomial.polynomial import polyfit
 import pandas as pd
 
+import difflib
+
+
 aggregate_filename = "aggregate.json"
 
 # load from JSON checkpoint if available
@@ -117,15 +120,15 @@ print("Names to be cleaned: ", len(name_cleanup))
 print("Names before cleaning: ", len(all_products))
 print("Names after cleaning: ", len(all_cleaned_products))
 
-import difflib
-
 # find similar names
-# for idx, name in enumerate(all_cleaned_products):
-#     print(
-#         difflib.get_close_matches(
-#             name, [x for i, x in enumerate(all_cleaned_products) if i != idx]
-#         )
-#     )
+def print_similar_names():
+    for idx, name in enumerate(all_cleaned_products):
+        print(
+            difflib.get_close_matches(
+                name, [x for i, x in enumerate(all_cleaned_products) if i != idx]
+            )
+        )
+
 
 status_set = set()
 estimate_set = set()
@@ -146,6 +149,17 @@ def get_num_completed(snapshot_data):
             )
         )
     )
+
+
+# convert everything into flat rows
+denormalized_data = []
+for timestamp, val in cleaned_data.items():
+    for name, product in val.items():
+        product["product_name"] = name
+        product["scrape_time"] = datetime.datetime.strptime(timestamp, "%Y%m%d%H%M%S")
+        denormalized_data.append(product)
+
+df = pd.DataFrame(data=denormalized_data)
 
 
 def plot_num_products():
@@ -171,22 +185,16 @@ def plot_num_products():
         width=10,
         label="Completed",
     )
+    ax.xaxis.set_major_formatter(
+        mdates.ConciseDateFormatter(ax.xaxis.get_major_locator())
+    )
+    ax.xaxis.set_minor_locator(mdates.MonthLocator())
     ax.xaxis_date()
     ax.legend()
 
     plt.title("Number of products on Novelkeys Updates page over time")
     plt.show()
 
-
-# convert everything into flat rows
-denormalized_data = []
-for timestamp, val in cleaned_data.items():
-    for name, product in val.items():
-        product["product_name"] = name
-        product["scrape_time"] = datetime.datetime.strptime(timestamp, "%Y%m%d%H%M%S")
-        denormalized_data.append(product)
-
-df = pd.DataFrame(data=denormalized_data)
 
 df = df.where(df["status"] != "completed").where(df["status"] != "Fulfilled!")
 
@@ -250,16 +258,6 @@ def plot_product_updates(
     ypos = range(len(earliest_date))
     fig, ax = plt.subplots()
 
-    # Plot the estimate
-    # ax.barh(
-    #     ypos,
-    #     earliest_date - estimate_date,
-    #     left=estimate_date,
-    #     height=0.8,
-    #     align="center",
-    #     color="black",
-    # )
-
     widths = earliest_date - latest_date
     for i in range(len(widths)):
         if widths[i] == 0:
@@ -282,6 +280,11 @@ def plot_product_updates(
 
     ax.get_yaxis().set_visible(False)
     ax.axis("auto")
+    ax.xaxis.set_major_formatter(
+        mdates.ConciseDateFormatter(ax.xaxis.get_major_locator())
+    )
+    ax.xaxis.set_minor_locator(mdates.MonthLocator())
+    ax.xaxis_date()
 
     xmax = (
         datetime.datetime(2023, 8, 17)
@@ -292,20 +295,22 @@ def plot_product_updates(
 
     if show_product_labels:
         ax.bar_label(container, labels, fontsize=5)
-    ax.xaxis_date()
 
     ax.legend(color_map.keys(), color_map.values())
 
-    legend_handles = list(
-        map(
-            lambda item: mpatches.Patch(color=item[1], label=item[0]),
-            color_map.items(),
-        ),
-    )
+    legend_handles = []
+
+    if show_categories:
+        legend_handles = list(
+            map(
+                lambda item: mpatches.Patch(color=item[1], label=item[0]),
+                color_map.items(),
+            ),
+        )
     if show_estimates:
         legend_handles.append(estimate_points)
 
-    if show_categories:
+    if show_categories or show_estimates:
         ax.legend(handles=legend_handles)
 
     plt.title(
@@ -348,30 +353,117 @@ def plot_delivery_times_over_time(
         agg_data["estimate"] - agg_data["earliest_seen"]
     ).apply(lambda t: round(t.days / 30.42))
 
-    agg_by_earliest_seen = agg_data.groupby("earliest_seen").agg(
+    # get the month the product was first seen
+    agg_data["earliest_seen_month"] = pd.to_datetime(
+        agg_data["earliest_seen"] + pd.offsets.MonthBegin(-1)
+    ).dt.date
+
+    agg_by_earliest_seen = agg_data.groupby("earliest_seen_month").agg(
         avg_delivery=("delivery_time", "mean"),
         avg_estimate=("estimated_time", "mean"),
-        earliest_seen=("earliest_seen", "first"),
+        earliest_seen=("earliest_seen_month", "first"),
         count=("product_name", "count"),
     )
 
     # filter out snapshots that have fewer than 3 new products
-    # agg_by_earliest_seen = agg_by_earliest_seen.loc[agg_by_earliest_seen["count"] >= 3]
+    agg_by_earliest_seen = agg_by_earliest_seen.loc[agg_by_earliest_seen["count"] >= 3]
 
     time = agg_by_earliest_seen["earliest_seen"]
 
     y1 = agg_by_earliest_seen["avg_delivery"]
     y2 = agg_by_earliest_seen["avg_estimate"]
 
+    _, ax = plt.subplots()
+    ax.xaxis.set_major_formatter(
+        mdates.ConciseDateFormatter(ax.xaxis.get_major_locator())
+    )
+    ax.xaxis.set_minor_locator(mdates.MonthLocator())
+    ax.xaxis_date()
+
     plt.plot(time, y1, label="Actual Delivery Time", marker=".")
     plt.plot(time, y2, label="Estimated Delivery Time", marker=".")
 
     plt.title(
-        "Average Estimated vs. Actual Delivery Time by Date of First Appearance",
+        "Average Estimated vs. Actual Delivery Time by Month of First Appearance",
         fontsize=14,
     )
-    plt.xlabel("Date of First Appearance")
+    plt.xlabel("Month of First Appearance")
     plt.ylabel("Delivery Time (Months)")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+
+def plot_num_exceeding_estimate(
+    df,
+    filter_categories=None,
+):
+    agg_data = df.groupby("product_name").agg(
+        earliest_seen=("scrape_time", "min"),
+        latest_seen=("scrape_time", "max"),
+        product_name=("product_name", "first"),
+        category=("category", "first"),
+        estimate=("refined_estimate", "first"),
+        estimate_text=("estimate", "first"),
+    )
+
+    # get the month the product was first seen in
+    agg_data["earliest_seen_month"] = pd.to_datetime(
+        agg_data["earliest_seen"] + pd.offsets.MonthBegin(-1)
+    ).dt.date
+
+    if filter_categories is not None:
+        agg_data = agg_data.loc[agg_data["category"].isin(filter_categories)]
+
+    delivered_early = agg_data.where(
+        agg_data["latest_seen"] <= agg_data["estimate"]
+    ).loc[agg_data["latest_seen"] < datetime.datetime(2022, 6, 17)]
+    delivered_late = agg_data.where(agg_data["latest_seen"] > agg_data["estimate"])
+
+    num_early = delivered_early.groupby("earliest_seen_month").agg(
+        earliest_seen=("earliest_seen_month", "first"),
+        count=("product_name", "count"),
+    )
+
+    num_late = delivered_late.groupby("earliest_seen_month").agg(
+        earliest_seen=("earliest_seen_month", "first"),
+        count=("product_name", "count"),
+    )
+
+    early_time = mdates.date2num(num_early["earliest_seen"])
+    late_time = mdates.date2num(num_late["earliest_seen"])
+
+    y1 = num_early["count"]
+    y2 = num_late["count"]
+
+    _, ax = plt.subplots()
+    ax.xaxis.set_major_formatter(
+        mdates.ConciseDateFormatter(ax.xaxis.get_major_locator())
+    )
+    ax.xaxis.set_minor_locator(mdates.MonthLocator())
+    ax.xaxis_date()
+
+    width = 10
+
+    plt.bar(
+        early_time - width / 2,
+        y1,
+        label="Products Delivered At or Before Estimated Date",
+        width=10,
+    )
+    plt.bar(
+        late_time + width / 2,
+        y2,
+        label="Products Delivered Later Than Estimated",
+        width=10,
+    )
+
+    plt.title(
+        "Number of Products Delivered Early/Late by Month of First Appearance",
+        fontsize=14,
+    )
+    plt.xlabel("Month of First Appearance")
+    plt.ylabel("Number of Products")
     plt.grid(True)
     plt.legend()
     plt.show()
@@ -422,6 +514,10 @@ def plot_estimate_times_over_time(
     plt.plot(x, b + m * x, "-")
     plt.scatter(x, y, label="Estimated Delivery Time", marker=".")
 
+    ax.xaxis.set_major_formatter(
+        mdates.ConciseDateFormatter(ax.xaxis.get_major_locator())
+    )
+    ax.xaxis.set_minor_locator(mdates.MonthLocator())
     ax.xaxis_date()
 
     plt.title(
@@ -437,17 +533,25 @@ def plot_estimate_times_over_time(
 # plot_num_products()
 # plot_product_updates(df, filter_incomplete_data=False)
 
-plot_product_updates(df, filter_incomplete_data=False, show_estimates=False)
+# plot_product_updates(
+#     df, filter_incomplete_data=False, show_estimates=False, show_categories=False
+# )
 
-plot_product_updates(df, filter_incomplete_data=False, show_estimates=True)
+plot_product_updates(df, filter_incomplete_data=True, show_estimates=True)
 
 # plot_product_updates(df, show_categories=False)
 
 # plot_product_updates(df, display_estimates=True, show_product_labels=True)
 # plot_product_updates(df, display_estimates=False)
 
-plot_product_updates(df, filter_categories=["keycaps"])
+# plot_product_updates(
+#     df, filter_incomplete_data=False, show_estimates=True, show_categories=True
+# )
 
-plot_delivery_times_over_time(df, filter_incomplete_data=False)
+# plot_product_updates(df, filter_categories=["keycaps"])
 
-plot_estimate_times_over_time(df, filter_incomplete_data=False)
+plot_delivery_times_over_time(df)
+
+plot_num_exceeding_estimate(df)
+
+# plot_estimate_times_over_time(df, filter_incomplete_data=False)
