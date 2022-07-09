@@ -1,5 +1,3 @@
-import pprint
-
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
 
@@ -7,10 +5,10 @@ from aggregate import aggregate_data
 import json
 import os.path
 
-import numpy as np
 import matplotlib.pyplot as plt
 import datetime
 
+from numpy.polynomial.polynomial import polyfit
 import pandas as pd
 
 aggregate_filename = "aggregate.json"
@@ -31,17 +29,6 @@ all_products = set()
 for timestamp, val in data.items():
     for name in val.keys():
         all_products.add(name)
-
-# all_products = {}
-
-# for timestamp, val in data.items():
-#     for name in val.keys():
-#         if name not in all_products:
-#             all_products[name] = []
-#         all_products[name].append((timestamp, val[name].get("status")))
-
-# pprint.pprint(all_products)
-# print(len(all_products))
 
 name_cleanup = {
     "Superuser Deskpads": "Superuser Deskpad",
@@ -64,6 +51,14 @@ name_cleanup = {
     "Colorchrome Deskpads": "Colorchrome Deskpad",
     "Awaken Deskpads": "Awaken Deskpad",
     "Analog Dreams Deskpads": "Analog Dreams R2 Deskpad",
+    "GMK RGB Add-on Kit": "GMK RGB Add on Kit",
+    "M6-C Milkshake Edition": "MC-6 - Milkshake Edition",
+    "NK65™ - Aluminum Edition": "NK65 Aluminum Edition",
+    "NK65 - Aluminum Edition": "NK65 Aluminum Edition",
+    "GMK Greek Beige Add-on Kit": "GMK Greek Beige Add-On Kit",
+    "NK65 - Olivia Edition": "NK65 Olivia Edition",
+    "Yuri Deskpads": "Yuri Deskpad",
+    "NK87 Aluminum Edition Preorder": "NK87 - Aluminum Edition",
 }
 
 # turn a text estimate into a datetime
@@ -122,6 +117,16 @@ print("Names to be cleaned: ", len(name_cleanup))
 print("Names before cleaning: ", len(all_products))
 print("Names after cleaning: ", len(all_cleaned_products))
 
+import difflib
+
+# find similar names
+# for idx, name in enumerate(all_cleaned_products):
+#     print(
+#         difflib.get_close_matches(
+#             name, [x for i, x in enumerate(all_cleaned_products) if i != idx]
+#         )
+#     )
+
 status_set = set()
 estimate_set = set()
 
@@ -133,7 +138,13 @@ for timestamp, val in cleaned_data.items():
 
 def get_num_completed(snapshot_data):
     return len(
-        list(filter(lambda v: v.get("status") == "completed", snapshot_data.values()))
+        list(
+            filter(
+                lambda v: v.get("status") == "completed"
+                or v.get("status") == "Fulfilled!",
+                snapshot_data.values(),
+            )
+        )
     )
 
 
@@ -177,49 +188,42 @@ for timestamp, val in cleaned_data.items():
 
 df = pd.DataFrame(data=denormalized_data)
 
-df = df.where(df["status"] != "completed")
+df = df.where(df["status"] != "completed").where(df["status"] != "Fulfilled!")
 
 
-df["earliest_seen"] = df.groupby("product_name")["scrape_time"].transform("min")
-
-df["latest_seen"] = df.groupby("product_name")["scrape_time"].transform("max")
-
-df["tracked_time"] = df["latest_seen"] - df["earliest_seen"]
-
-print(
-    df.loc[df["product_name"] == "GMK Dots R2"].filter(items=["status", "scrape_time"])
-)
-
-
-def graph_product_updates(
+def plot_product_updates(
     df,
     sort_by_earliest=True,
     show_categories=True,
     show_product_labels=False,
     filter_incomplete_data=True,
     filter_categories=None,
-    display_estimates=True,
+    show_estimates=True,
 ):
-    if filter_incomplete_data:
-        # only show products which have started after the first scrape date
-        # and ended before the last date, to get the whole run accurately
-        df = df.loc[df["latest_seen"] < datetime.datetime(2022, 6, 17)]
-        df = df.loc[df["earliest_seen"] > datetime.datetime(2019, 11, 14)]
-
     if filter_categories is not None:
         df = df.loc[df["category"].isin(filter_categories)]
 
     agg_data = (
         df.groupby("product_name")
         .agg(
-            earliest_seen=("earliest_seen", "first"),
-            latest_seen=("latest_seen", "first"),
+            earliest_seen=("scrape_time", "min"),
+            latest_seen=("scrape_time", "max"),
             product_name=("product_name", "first"),
             category=("category", "first"),
             estimate=("refined_estimate", "first"),
         )
         .sort_values("earliest_seen" if sort_by_earliest else "latest_seen")
     )
+
+    if filter_incomplete_data:
+        # only show products which have started after the first scrape date
+        # and ended before the last date, to get the whole run accurately
+        agg_data = agg_data.loc[
+            agg_data["latest_seen"] < datetime.datetime(2022, 6, 17)
+        ]
+        agg_data = agg_data.loc[
+            agg_data["earliest_seen"] > datetime.datetime(2019, 11, 14)
+        ]
 
     earliest_date = agg_data["earliest_seen"]
     latest_date = agg_data["latest_seen"]
@@ -256,27 +260,38 @@ def graph_product_updates(
     #     color="black",
     # )
 
+    widths = earliest_date - latest_date
+    for i in range(len(widths)):
+        if widths[i] == 0:
+            widths[i] = 10
+
     # Plot the data
     container = ax.barh(
         ypos,
-        earliest_date - latest_date,
+        widths,
         left=latest_date,
         height=0.9,
         align="center",
         color=(colors if show_categories else None),
     )
 
-    if display_estimates:
+    if show_estimates:
         estimate_points = plt.scatter(
             estimate_date, ypos, s=40, c="black", marker="*", label="Initial Estimate"
         )
 
     ax.get_yaxis().set_visible(False)
     ax.axis("auto")
-    ax.set_xlim([datetime.datetime(2019, 11, 14), datetime.datetime(2022, 6, 17)])
+
+    xmax = (
+        datetime.datetime(2023, 8, 17)
+        if show_estimates and not filter_incomplete_data
+        else datetime.datetime(2022, 6, 17)
+    )
+    ax.set_xlim([datetime.datetime(2019, 11, 14), xmax])
 
     if show_product_labels:
-        ax.bar_label(container, labels)
+        ax.bar_label(container, labels, fontsize=5)
     ax.xaxis_date()
 
     ax.legend(color_map.keys(), color_map.values())
@@ -287,7 +302,7 @@ def graph_product_updates(
             color_map.items(),
         ),
     )
-    if display_estimates:
+    if show_estimates:
         legend_handles.append(estimate_points)
 
     if show_categories:
@@ -300,14 +315,139 @@ def graph_product_updates(
     plt.show()
 
 
+def plot_delivery_times_over_time(
+    df,
+    filter_incomplete_data=True,
+    filter_categories=None,
+):
+    agg_data = df.groupby("product_name").agg(
+        earliest_seen=("scrape_time", "min"),
+        latest_seen=("scrape_time", "max"),
+        product_name=("product_name", "first"),
+        category=("category", "first"),
+        estimate=("refined_estimate", "first"),
+        estimate_text=("estimate", "first"),
+    )
+
+    if filter_incomplete_data:
+        agg_data = agg_data.loc[
+            agg_data["latest_seen"] < datetime.datetime(2022, 6, 17)
+        ]
+        agg_data = agg_data.loc[
+            agg_data["earliest_seen"] > datetime.datetime(2019, 11, 14)
+        ]
+
+    if filter_categories is not None:
+        agg_data = agg_data.loc[agg_data["category"].isin(filter_categories)]
+
+    agg_data["delivery_time"] = (
+        agg_data["latest_seen"] - agg_data["earliest_seen"]
+    ).apply(lambda t: round(t.days / 30.42))
+
+    agg_data["estimated_time"] = (
+        agg_data["estimate"] - agg_data["earliest_seen"]
+    ).apply(lambda t: round(t.days / 30.42))
+
+    agg_by_earliest_seen = agg_data.groupby("earliest_seen").agg(
+        avg_delivery=("delivery_time", "mean"),
+        avg_estimate=("estimated_time", "mean"),
+        earliest_seen=("earliest_seen", "first"),
+        count=("product_name", "count"),
+    )
+
+    # filter out snapshots that have fewer than 3 new products
+    # agg_by_earliest_seen = agg_by_earliest_seen.loc[agg_by_earliest_seen["count"] >= 3]
+
+    time = agg_by_earliest_seen["earliest_seen"]
+
+    y1 = agg_by_earliest_seen["avg_delivery"]
+    y2 = agg_by_earliest_seen["avg_estimate"]
+
+    plt.plot(time, y1, label="Actual Delivery Time", marker=".")
+    plt.plot(time, y2, label="Estimated Delivery Time", marker=".")
+
+    plt.title(
+        "Average Estimated vs. Actual Delivery Time by Date of First Appearance",
+        fontsize=14,
+    )
+    plt.xlabel("Date of First Appearance")
+    plt.ylabel("Delivery Time (Months)")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
+
+def plot_estimate_times_over_time(
+    df,
+    filter_incomplete_data=True,
+    filter_categories=None,
+):
+    agg_data = df.groupby("product_name").agg(
+        earliest_seen=("scrape_time", "min"),
+        latest_seen=("scrape_time", "max"),
+        product_name=("product_name", "first"),
+        category=("category", "first"),
+        estimate=("refined_estimate", "first"),
+        estimate_text=("estimate", "first"),
+    )
+
+    if filter_incomplete_data:
+        agg_data = agg_data.loc[
+            agg_data["latest_seen"] < datetime.datetime(2022, 6, 17)
+        ]
+        agg_data = agg_data.loc[
+            agg_data["earliest_seen"] > datetime.datetime(2019, 11, 14)
+        ]
+
+    if filter_categories is not None:
+        agg_data = agg_data.loc[agg_data["category"].isin(filter_categories)]
+
+    agg_data["delivery_time"] = (
+        agg_data["latest_seen"] - agg_data["earliest_seen"]
+    ).apply(lambda t: round(t.days / 30.42))
+
+    agg_data["estimated_time"] = (
+        agg_data["estimate"] - agg_data["earliest_seen"]
+    ).apply(lambda t: round(t.days / 30.42))
+
+    x = mdates.date2num(agg_data["earliest_seen"])
+    y = agg_data["estimated_time"]
+
+    # Fit with polyfit
+    b, m = polyfit(x, y, 1)
+
+    _, ax = plt.subplots()
+
+    plt.plot(x, y, ".")
+    plt.plot(x, b + m * x, "-")
+    plt.scatter(x, y, label="Estimated Delivery Time", marker=".")
+
+    ax.xaxis_date()
+
+    plt.title(
+        "Estimated Delivery Time by Date of First Appearance",
+        fontsize=14,
+    )
+    plt.xlabel("Date of First Appearance")
+    plt.ylabel("Estimated Delivery Time (Months)")
+
+    plt.show()
+
+
 # plot_num_products()
-# graph_product_updates(df)
+# plot_product_updates(df, filter_incomplete_data=False)
 
-# graph_product_updates(df, show_categories=False, filter_incomplete_data=False)
+plot_product_updates(df, filter_incomplete_data=False, show_estimates=False)
 
-# graph_product_updates(df, show_categories=False)
+plot_product_updates(df, filter_incomplete_data=False, show_estimates=True)
 
-graph_product_updates(df, display_estimates=True)
-graph_product_updates(df, display_estimates=False)
+# plot_product_updates(df, show_categories=False)
 
-# graph_product_updates(df, filter_categories=["keycaps"])
+# plot_product_updates(df, display_estimates=True, show_product_labels=True)
+# plot_product_updates(df, display_estimates=False)
+
+plot_product_updates(df, filter_categories=["keycaps"])
+
+plot_delivery_times_over_time(df, filter_incomplete_data=False)
+
+plot_estimate_times_over_time(df, filter_incomplete_data=False)
