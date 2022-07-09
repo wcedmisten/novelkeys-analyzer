@@ -46,7 +46,7 @@ def scrape_updates_novelkeys_xyz(filepath):
             elif "keyboard" in name.lower():
                 category = "keyboards"
             else:
-                category = "keycaps"
+                category = "unknown"
 
             # grouping status by number of matches:
             # 5: in progress

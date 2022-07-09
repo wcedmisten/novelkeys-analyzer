@@ -1,11 +1,10 @@
-import matplotlib.dates as mdates
-import matplotlib.patches as mpatches
-
 from aggregate import aggregate_data
 import json
 import os.path
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.patches as mpatches
 import datetime
 
 from numpy.polynomial.polynomial import polyfit
@@ -72,11 +71,11 @@ def refine_estimate(estimate):
     estimate = (
         estimate.replace(".", "")
         .replace("Sept", "Sep")
-        .replace("Q1", "Feb")
-        .replace("Q2-3", "Jun")
-        .replace("Q2", "May")
-        .replace("Q3", "Aug")
-        .replace("Q4", "Nov")
+        .replace("Q1", "Mar")
+        .replace("Q2-3", "Sep")
+        .replace("Q2", "Jun")
+        .replace("Q3", "Sep")
+        .replace("Q4", "Dec")
     )
 
     refined_estimate = None
@@ -86,7 +85,16 @@ def refine_estimate(estimate):
     except Exception as e:
         refined_estimate = datetime.datetime.strptime(estimate, "%B %Y")
 
-    return refined_estimate
+    try:
+        nextmonthdate = refined_estimate.replace(
+            month=refined_estimate.month + 1, day=1
+        )
+    except ValueError:
+        if refined_estimate.month == 12:
+            nextmonthdate = refined_estimate.replace(
+                year=refined_estimate.year + 1, month=1, day=1
+            )
+    return nextmonthdate
 
 
 cleaned_data = {}
@@ -97,12 +105,20 @@ for timestamp, val in data.items():
 
     for name in val.keys():
         # special case - skip this because it's duplicate
-        if name == "NK65™ - Oblivion V3.1 Edition":
+        if name == "NK65™ - Oblivion V3.1 Edition" or name == "Decent65":
             continue
 
         # use the preferred "cleaned" name if possible
         # otherwise keep the old name
         new_name = name_cleanup.get(name, name)
+
+        # handle special cases where 2nd run was not renamed
+        if name == "GMK Striker" and timestamp > "20210613000000":
+            new_name = "GMK Striker 2"
+
+        if name == "GMK Bento" and timestamp > "20210613000000":
+            new_name = "GMK Bento R2"
+
         # make sure there are no duplicates
         assert new_name not in cleaned_data[timestamp]
         cleaned_data[timestamp][new_name] = val[name]
@@ -161,6 +177,21 @@ for timestamp, val in cleaned_data.items():
 
 df = pd.DataFrame(data=denormalized_data)
 
+completed_time = (
+    df.loc[df["status"].isin(["completed", "Fulfilled!"])]
+    .groupby("product_name")
+    .agg(completed_time=("scrape_time", "min"))
+)
+
+with pd.option_context(
+    "display.max_rows", None, "display.max_columns", None
+):  # more options can be specified also
+    print(df.loc[df["product_name"] == "GMK Striker 2"])
+
+df = df.where(df["status"] != "completed").where(df["status"] != "Fulfilled!")
+
+df = df.merge(completed_time, how="left", on="product_name")
+
 
 def plot_num_products():
     time = []
@@ -196,17 +227,16 @@ def plot_num_products():
     plt.show()
 
 
-df = df.where(df["status"] != "completed").where(df["status"] != "Fulfilled!")
-
-
 def plot_product_updates(
     df,
     sort_by_earliest=True,
     show_categories=True,
     show_product_labels=False,
     filter_incomplete_data=True,
+    filter_completed_data=False,
     filter_categories=None,
     show_estimates=True,
+    title="Timeline of Novelkeys Updates",
 ):
     if filter_categories is not None:
         df = df.loc[df["category"].isin(filter_categories)]
@@ -216,25 +246,38 @@ def plot_product_updates(
         .agg(
             earliest_seen=("scrape_time", "min"),
             latest_seen=("scrape_time", "max"),
+            completed_time=("completed_time", "first"),
             product_name=("product_name", "first"),
             category=("category", "first"),
             estimate=("refined_estimate", "first"),
         )
-        .sort_values("earliest_seen" if sort_by_earliest else "latest_seen")
+        .sort_values(
+            ["earliest_seen", "latest_seen"] if sort_by_earliest else "latest_seen"
+        )
+    )
+
+    agg_data["completed_time"].fillna(
+        agg_data["latest_seen"],
+        inplace=True,
     )
 
     if filter_incomplete_data:
         # only show products which have started after the first scrape date
         # and ended before the last date, to get the whole run accurately
         agg_data = agg_data.loc[
-            agg_data["latest_seen"] < datetime.datetime(2022, 6, 17)
+            agg_data["completed_time"] < datetime.datetime(2022, 6, 17)
         ]
         agg_data = agg_data.loc[
             agg_data["earliest_seen"] > datetime.datetime(2019, 11, 14)
         ]
 
+    if filter_completed_data:
+        agg_data = agg_data.loc[
+            agg_data["latest_seen"] > datetime.datetime(2022, 6, 17)
+        ]
+
     earliest_date = agg_data["earliest_seen"]
-    latest_date = agg_data["latest_seen"]
+    latest_date = agg_data["completed_time"]
 
     estimate_date = agg_data["estimate"]
 
@@ -242,10 +285,11 @@ def plot_product_updates(
     categories = agg_data["category"]
 
     color_map = {
-        "keycaps": "#0168b4",
+        "unknown": "#73a7fa",
         "keyboards": "#7ddb72",
         "deskpads": "#bc0072",
-        "switches": "#ff5949",
+        "keycaps": "#ff5949",
+        "switches": "#9d6000",
     }
 
     colors = list(map(lambda category: color_map.get(category, "black"), categories))
@@ -256,7 +300,7 @@ def plot_product_updates(
     ]
 
     ypos = range(len(earliest_date))
-    fig, ax = plt.subplots()
+    _, ax = plt.subplots()
 
     widths = earliest_date - latest_date
     for i in range(len(widths)):
@@ -268,14 +312,25 @@ def plot_product_updates(
         ypos,
         widths,
         left=latest_date,
-        height=0.9,
-        align="center",
+        height=0.8,
+        # align="center",
         color=(colors if show_categories else None),
     )
 
+    if not filter_incomplete_data or filter_completed_data:
+        plt.axvline(x=datetime.datetime(2022, 6, 17), color="red")
+        plt.text(
+            datetime.datetime(2022, 6, 20), 2, "Last\ncollected\nsnapshot", fontsize=16
+        )
+
     if show_estimates:
         estimate_points = plt.scatter(
-            estimate_date, ypos, s=40, c="black", marker="*", label="Initial Estimate"
+            estimate_date,
+            ypos,
+            s=40 if filter_completed_data else 10,
+            c="black",
+            marker="*",
+            label="Initial Estimate (Worst Case)",
         )
 
     ax.get_yaxis().set_visible(False)
@@ -287,7 +342,7 @@ def plot_product_updates(
     ax.xaxis_date()
 
     xmax = (
-        datetime.datetime(2023, 8, 17)
+        datetime.datetime(2023, 5, 17)
         if show_estimates and not filter_incomplete_data
         else datetime.datetime(2022, 6, 17)
     )
@@ -313,10 +368,7 @@ def plot_product_updates(
     if show_categories or show_estimates:
         ax.legend(handles=legend_handles)
 
-    plt.title(
-        "Timeline of Novelkeys Updates, sorted by "
-        + ("start date" if sort_by_earliest else "completion date")
-    )
+    plt.title(title)
     plt.show()
 
 
@@ -366,7 +418,7 @@ def plot_delivery_times_over_time(
     )
 
     # filter out snapshots that have fewer than 3 new products
-    agg_by_earliest_seen = agg_by_earliest_seen.loc[agg_by_earliest_seen["count"] >= 3]
+    # agg_by_earliest_seen = agg_by_earliest_seen.loc[agg_by_earliest_seen["count"] >= 3]
 
     time = agg_by_earliest_seen["earliest_seen"]
 
@@ -448,14 +500,14 @@ def plot_num_exceeding_estimate(
     plt.bar(
         early_time - width / 2,
         y1,
-        label="Products Delivered At or Before Estimated Date",
-        width=10,
+        label="Delivered At or Before Estimated Date",
+        width=width,
     )
     plt.bar(
         late_time + width / 2,
         y2,
-        label="Products Delivered Later Than Estimated",
-        width=10,
+        label="Delivered Later Than Estimated",
+        width=width,
     )
 
     plt.title(
@@ -464,7 +516,7 @@ def plot_num_exceeding_estimate(
     )
     plt.xlabel("Month of First Appearance")
     plt.ylabel("Number of Products")
-    plt.grid(True)
+
     plt.legend()
     plt.show()
 
@@ -537,7 +589,38 @@ def plot_estimate_times_over_time(
 #     df, filter_incomplete_data=False, show_estimates=False, show_categories=False
 # )
 
-plot_product_updates(df, filter_incomplete_data=True, show_estimates=True)
+plot_product_updates(
+    df,
+    filter_incomplete_data=False,
+    show_estimates=False,
+    show_categories=False,
+    title="Timeline of All Novelkeys Products",
+)
+
+plot_product_updates(
+    df,
+    filter_incomplete_data=False,
+    show_estimates=False,
+    show_product_labels=True,
+    title="Labeled Timeline of All Novelkeys Products",
+)
+
+plot_product_updates(
+    df,
+    filter_incomplete_data=True,
+    show_estimates=True,
+    show_product_labels=True,
+    title="Timeline of Completed Novelkeys Products as of June 16, 2022",
+)
+
+plot_product_updates(
+    df,
+    filter_incomplete_data=False,
+    filter_completed_data=True,
+    show_estimates=True,
+    show_product_labels=True,
+    title="Timeline of In Progress Novelkeys Products as of June 16, 2022",
+)
 
 # plot_product_updates(df, show_categories=False)
 
@@ -554,4 +637,4 @@ plot_delivery_times_over_time(df)
 
 plot_num_exceeding_estimate(df)
 
-# plot_estimate_times_over_time(df, filter_incomplete_data=False)
+plot_estimate_times_over_time(df, filter_incomplete_data=False)
