@@ -53,13 +53,13 @@ def plot_num_products(df_all, filename="test.png"):
     )
     ax.xaxis.set_minor_locator(mdates.MonthLocator())
     ax.xaxis_date()
-    ax.legend(loc="upper left")
+    ax.legend(loc="upper left", fontsize=8)
 
     plt.xlabel("Month")
     plt.ylabel("Number of Products")
 
-    plt.axvline(x=datetime.datetime(2021, 8, 17), color="black", linestyle="dashed")
-    plt.text(datetime.datetime(2021, 8, 20), 80, "Website Redesign", fontsize=7)
+    plt.axvline(x=datetime.datetime(2021, 8, 17), color="black")
+    plt.text(datetime.datetime(2021, 8, 25), 80, "Website Redesign", fontsize=7)
 
     plt.title("Number of products on Novelkeys Updates page by Month")
     plt.savefig(filename, dpi=200)

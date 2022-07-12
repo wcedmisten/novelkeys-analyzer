@@ -98,7 +98,7 @@ def plot_product_updates(
     )
 
     if show_in_progress_products:
-        plt.axvline(x=datetime.datetime(2022, 6, 17), color="black", linestyle="dashed")
+        plt.axvline(x=datetime.datetime(2022, 6, 17), color="gray")
         plt.text(
             datetime.datetime(2022, 6, 20), 2, "Last collected\nsnapshot", fontsize=10
         )
@@ -107,7 +107,7 @@ def plot_product_updates(
         estimate_points = plt.scatter(
             estimate_date,
             ypos,
-            s=40 if show_in_progress_products else 10,
+            s=20 if show_in_progress_products else 10,
             c="black",
             marker="*",
             label="Initial Estimate",

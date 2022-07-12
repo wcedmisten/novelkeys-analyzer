@@ -6,6 +6,8 @@ from plot_product_updates import plot_product_updates
 from plot_delivery_times_over_time import plot_delivery_times_over_time
 from plot_num_exceeding_estimate import plot_num_exceeding_estimate
 from plot_estimate_times_over_time import plot_estimate_times_over_time
+from plot_total_num_exceeding_estimate import plot_total_num_exceeding_estimate
+
 
 import json
 import os.path
@@ -252,3 +254,5 @@ plot_num_exceeding_estimate(df, filename="num-delivered-early-late.png")
 plot_estimate_times_over_time(
     df, filter_incomplete_data=False, filename="estimates-over-time.png"
 )
+
+plot_total_num_exceeding_estimate(df)
